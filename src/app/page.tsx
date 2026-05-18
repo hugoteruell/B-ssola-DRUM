@@ -12,10 +12,18 @@ export default function Home() {
   const [sessionId, setSessionId] = useState<string>("");
   const [iniciou, setIniciou] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [fase, setFase] = useState<Fase>("INTAKER");
   const [artefato, setArtefato] = useState<Artefato | null>(null);
+  const [voiceMode, setVoiceMode] = useState(true);
+  const [recording, setRecording] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [typedInput, setTypedInput] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,10 +39,43 @@ export default function Home() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [msgs, loading]);
 
+  async function falar(texto: string) {
+    if (!voiceMode || !texto.trim()) return;
+    try {
+      setSpeaking(true);
+      const r = await fetch("/api/voice/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: texto }),
+      });
+      if (!r.ok) {
+        setSpeaking(false);
+        return;
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        URL.revokeObjectURL(audioRef.current.src);
+      }
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => {
+        setSpeaking(false);
+        URL.revokeObjectURL(url);
+      };
+      audio.onerror = () => setSpeaking(false);
+      await audio.play().catch(() => setSpeaking(false));
+    } catch {
+      setSpeaking(false);
+    }
+  }
+
   async function enviar(texto: string) {
     if (!texto.trim() || loading || !sessionId) return;
+    setErro(null);
     setMsgs((m) => [...m, { role: "user", content: texto }]);
-    setInput("");
+    setTypedInput("");
     setLoading(true);
     try {
       const r = await fetch("/api/chat", {
@@ -44,17 +85,17 @@ export default function Home() {
       });
       const data = await r.json();
       if (data.error) {
-        setMsgs((m) => [...m, { role: "assistant", content: `⚠️ ${data.error}` }]);
+        setErro(data.error);
       } else {
-        setMsgs((m) => [...m, { role: "assistant", content: data.resposta || "..." }]);
+        const resposta = data.resposta || "...";
+        setMsgs((m) => [...m, { role: "assistant", content: resposta }]);
         setFase(data.fase as Fase);
         if (data.artefato) setArtefato(data.artefato);
+        // Toca a fala da Bússola
+        falar(resposta);
       }
     } catch (e) {
-      setMsgs((m) => [
-        ...m,
-        { role: "assistant", content: `⚠️ Erro de rede: ${(e as Error).message}` },
-      ]);
+      setErro((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -62,11 +103,82 @@ export default function Home() {
 
   async function iniciar() {
     setIniciou(true);
+    // Pede permissão de mic já na abertura para não interromper o fluxo depois.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+    } catch {
+      // sem mic → o usuário ainda pode digitar
+    }
     await enviar("Oi! Estou pronta para conversar.");
+  }
+
+  async function startRec() {
+    if (recording || loading) return;
+    setErro(null);
+    try {
+      // Para a fala se ainda estiver tocando — barge-in.
+      if (audioRef.current) {
+        audioRef.current.pause();
+        setSpeaking(false);
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "";
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: mime || "audio/webm" });
+        if (blob.size < 1000) {
+          setRecording(false);
+          return;
+        }
+        await transcrever(blob);
+      };
+      recorderRef.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch (e) {
+      setErro("Não consegui acessar o microfone: " + (e as Error).message);
+    }
+  }
+
+  function stopRec() {
+    if (!recording) return;
+    setRecording(false);
+    setLoading(true);
+    recorderRef.current?.stop();
+  }
+
+  async function transcrever(blob: Blob) {
+    try {
+      const fd = new FormData();
+      fd.append("audio", blob, "fala.webm");
+      const r = await fetch("/api/voice/stt", { method: "POST", body: fd });
+      const data = await r.json();
+      if (data.error || !data.transcript) {
+        setErro("Não consegui entender o áudio. Tenta de novo?");
+        setLoading(false);
+        return;
+      }
+      setLoading(false);
+      await enviar(data.transcript);
+    } catch (e) {
+      setErro((e as Error).message);
+      setLoading(false);
+    }
   }
 
   async function resetar() {
     if (!sessionId) return;
+    if (audioRef.current) audioRef.current.pause();
     await fetch("/api/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -76,6 +188,7 @@ export default function Home() {
     setArtefato(null);
     setFase("INTAKER");
     setIniciou(false);
+    setErro(null);
   }
 
   const labelFase: Record<Fase, string> = {
@@ -97,12 +210,21 @@ export default function Home() {
             {labelFase[fase]}
           </span>
           {iniciou && (
-            <button
-              onClick={resetar}
-              className="text-xs text-[var(--muted)] hover:text-[var(--fg)]"
-            >
-              recomeçar
-            </button>
+            <>
+              <button
+                onClick={() => setVoiceMode((v) => !v)}
+                className="text-xs text-[var(--muted)] hover:text-[var(--fg)]"
+                title="ligar/desligar voz da Bússola"
+              >
+                {voiceMode ? "🔊" : "🔈"}
+              </button>
+              <button
+                onClick={resetar}
+                className="text-xs text-[var(--muted)] hover:text-[var(--fg)]"
+              >
+                recomeçar
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -112,15 +234,18 @@ export default function Home() {
           <h2 className="text-3xl font-semibold mb-3">
             Em 15 minutos, uma direção testável.
           </h2>
-          <p className="text-[var(--muted)] mb-8 leading-relaxed">
+          <p className="text-[var(--muted)] mb-3 leading-relaxed">
             Não vou te dizer que cargo escolher. Vamos descobrir juntos quando você se sente vivo
             no trabalho — e transformar isso em 2 ou 3 apostas concretas para os próximos 90 dias.
+          </p>
+          <p className="text-[var(--muted)] mb-8 text-sm">
+            A conversa é por voz: eu falo, você responde falando.
           </p>
           <button
             onClick={iniciar}
             className="px-6 py-3 rounded-full bg-[var(--accent)] text-black font-medium hover:opacity-90"
           >
-            Começar conversa
+            🎙 Começar conversa
           </button>
         </section>
       ) : (
@@ -128,7 +253,7 @@ export default function Home() {
           <div
             ref={scrollRef}
             className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2"
-            style={{ maxHeight: "calc(100vh - 220px)" }}
+            style={{ maxHeight: "calc(100vh - 260px)" }}
           >
             {msgs.slice(1).map((m, i) => (
               <div
@@ -153,39 +278,71 @@ export default function Home() {
                 </div>
               </div>
             )}
-
             {artefato && <ArtefatoCard artefato={artefato} />}
           </div>
 
+          {erro && (
+            <div className="mb-2 text-xs text-red-400 text-center">⚠️ {erro}</div>
+          )}
+
           {fase !== "ENCERRADO" && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                enviar(input);
-              }}
-              className="flex gap-2"
-            >
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    enviar(input);
-                  }
-                }}
-                placeholder="Escreva sua resposta…"
-                rows={2}
-                className="flex-1 resize-none rounded-2xl bg-[var(--surface)] border border-[var(--border)] px-4 py-3 text-sm focus:outline-none focus:border-[var(--accent)]"
-              />
+            <div className="flex flex-col items-center gap-3">
               <button
-                type="submit"
-                disabled={loading || !input.trim()}
-                className="px-4 rounded-2xl bg-[var(--accent)] text-black font-medium disabled:opacity-40"
+                onMouseDown={startRec}
+                onMouseUp={stopRec}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  startRec();
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  stopRec();
+                }}
+                disabled={loading || speaking}
+                className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl transition-all disabled:opacity-40 ${
+                  recording
+                    ? "bg-red-500 scale-110 animate-pulse"
+                    : "bg-[var(--accent)] hover:scale-105"
+                }`}
+                title={recording ? "Solte para enviar" : "Segure para falar"}
               >
-                enviar
+                🎙
               </button>
-            </form>
+              <div className="text-xs text-[var(--muted)] text-center">
+                {speaking
+                  ? "a Bússola está falando… (toque no mic para interromper)"
+                  : recording
+                    ? "ouvindo… solte para enviar"
+                    : "segure o botão para falar"}
+              </div>
+
+              <details className="w-full text-xs text-[var(--muted)] mt-2">
+                <summary className="cursor-pointer text-center hover:text-[var(--fg)]">
+                  ou digite ↓
+                </summary>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    enviar(typedInput);
+                  }}
+                  className="flex gap-2 mt-2"
+                >
+                  <input
+                    value={typedInput}
+                    onChange={(e) => setTypedInput(e.target.value)}
+                    placeholder="escreva e enter"
+                    className="flex-1 rounded-2xl bg-[var(--surface)] border border-[var(--border)] px-4 py-2 text-sm focus:outline-none focus:border-[var(--accent)] text-[var(--fg)]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={loading || !typedInput.trim()}
+                    className="px-3 rounded-2xl bg-[var(--accent)] text-black font-medium disabled:opacity-40"
+                  >
+                    enviar
+                  </button>
+                </form>
+              </details>
+            </div>
           )}
         </section>
       )}
