@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "sessionId e mensagem são obrigatórios" }, { status: 400 });
     }
 
-    const estado = getEstado(sessionId);
+    const estado = await getEstado(sessionId);
     estado.historico.push({ role: "user", content: mensagem });
 
     let respostaFinal = "";
@@ -71,14 +71,16 @@ export async function POST(req: NextRequest) {
     }
 
     estado.fase = proximaFase(estado);
-    setEstado(sessionId, estado);
+    const artefatoFinal =
+      artefato ?? (estado.fase === "ENCERRADO" ? montarArtefato(estado.perfil) : undefined);
+    await setEstado(sessionId, estado, artefatoFinal);
 
     return NextResponse.json({
       resposta: respostaFinal,
       fase: estado.fase,
       perfil: estado.perfil,
       encerrado: estado.fase === "ENCERRADO",
-      artefato: artefato ?? (estado.fase === "ENCERRADO" ? montarArtefato(estado.perfil) : undefined),
+      artefato: artefatoFinal,
     });
   } catch (err) {
     console.error("/api/chat error", err);

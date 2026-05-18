@@ -5,6 +5,6 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   const { sessionId } = (await req.json()) as { sessionId: string };
-  if (sessionId) resetEstado(sessionId);
+  if (sessionId) await resetEstado(sessionId);
   return NextResponse.json({ ok: true });
 }
