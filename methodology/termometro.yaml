@@ -1,0 +1,19 @@
+termometro_drum:
+  energia_alta:
+    - "Me conta um momento — pode ser do estágio, da faculdade, de um projeto pessoal — em que você perdeu a noção do tempo. O que estava fazendo?"
+    - "Qual foi a última vez que terminou algo cansado, mas com vontade de fazer de novo?"
+    - "Pensa numa entrega da qual você se orgulha. O que nela te deu essa sensação?"
+  energia_baixa:
+    - "E o contrário: qual tipo de tarefa faz o relógio andar devagar pra você?"
+    - "Teve algum trabalho ou matéria que você foi bem, mas que te esvaziava? Por quê?"
+  contexto_e_ambiente:
+    - "Você se lembra mais energizado sozinho resolvendo algo, ou junto de outras pessoas?"
+    - "Estrutura clara ou ambiguidade — qual te deixa mais à vontade?"
+  impacto:
+    - "Quando o que você fez gerou impacto, esse impacto foi pra quem? Como você percebeu?"
+
+eixos_life_design:
+  modo_de_atividade: [criar, analisar, organizar, conectar, ensinar, decidir]
+  ambiente_preferido: [estruturado, ambíguo, autônomo, colaborativo]
+  fonte_de_energia: [pessoas, ideias, dados, execução, impacto_visível]
+  tolerancia_a_risco: [baixa, média, alta]

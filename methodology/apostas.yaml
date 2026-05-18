@@ -1,0 +1,20 @@
+templates_de_aposta:
+  conversa:
+    descricao: "Converse com {n} pessoas que vivem {padrão} no dia a dia."
+    exemplo: "Converse com 3 consultores esta semana e pergunte o que mais os energiza."
+    custo: baixo
+    testa: "Se o dia a dia real bate com a sua hipótese de realização."
+  projeto_pequeno:
+    descricao: "Faça um projeto de {atividade} sobre {tema} em 2 semanas."
+    exemplo: "Faça uma análise de dados de um tema que você curte e publique."
+    custo: baixo
+    testa: "Se você se energiza fazendo, não só imaginando."
+  metodologia:
+    descricao: "Aplique {metodologia} num problema real do seu contexto."
+    exemplo: "Use design thinking para repensar um processo do seu trabalho atual."
+    custo: baixo
+    testa: "Se a forma de trabalhar te atrai tanto quanto a área."
+  imersao:
+    descricao: "Passe {tempo} dentro de um ambiente de {tipo} (evento, voluntariado, shadowing)."
+    custo: médio
+    testa: "Se o ambiente te dá energia ou te drena."
